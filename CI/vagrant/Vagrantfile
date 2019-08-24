@@ -1,0 +1,43 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+$script = <<SCRIPT
+# kill apt that is started on boot time
+sudo systemctl stop apt-daily.service
+sudo systemctl stop apt-daily.timer
+sudo systemctl disable apt-daily.service
+sudo systemctl disable apt-daily.timer
+
+sudo systemctl kill --kill-who=all apt-daily.service
+
+# wait until `apt-get updated` has been killed
+while ! (sudo systemctl list-units --all apt-daily.service | fgrep -q dead)
+do
+  sleep 1;
+done
+
+# wait unitl other software managers are done
+while sudo fuser /var/lib/dpkg/lock >/dev/null 2>&1; do sleep 1; done
+
+# download and install polycube and all the dependencies
+SCRIPT
+
+# All Vagrant configuration is done below. The "2" in Vagrant.configure
+# configures the configuration version (we support older styles for
+# backwards compatibility). Please don't change it unless you know what
+# you're doing.
+Vagrant.configure("2") do |config|
+  #config.vm.box = "iovnet"
+  config.vm.box = "generic/ubuntu1804"
+  config.vm.provision "shell", privileged: false, inline: $script
+
+  # Use rsync for syncing
+  config.vm.synced_folder ENV['JENKINS_WORKSPACE'], "/vagrant", type: "rsync",
+  rsync__args: ["--verbose", "--rsync-path='sudo rsync'", "--archive", "--delete", "-z", "-a"]
+
+  config.vm.provider "libvirt" do |libvirt|
+      libvirt.driver = "kvm"
+      libvirt.memory = 4096
+      libvirt.cpus = 4
+  end
+end
