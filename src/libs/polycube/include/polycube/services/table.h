@@ -46,6 +46,11 @@ class RawTable {
   int pop(void *value);
   int push(const void *value);
 
+  int get_batch(void *keys, void *values, unsigned count);
+  int get_and_delete_batch(void *keys, void *values, unsigned count);
+
+  bool is_batch_supported();
+
   // protected:
   RawTable(void *op);
 

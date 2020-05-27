@@ -126,7 +126,7 @@ json MapExtractor::extractFromMap(BaseCube &cube_ref, string map_name, int index
     // Case to handle simple hash types (key->value)
 
     // Getting the map entries
-    auto entries = getMapEntries(table, desc.key_size, desc.leaf_size);
+    auto entries = getMapEntries(table, desc);
 
     json key_desc = json::parse(string{desc.key_desc});
     cube_ref.logger()->debug("{0} key_desc:\n{1}", map_name, key_desc.dump(2));
@@ -144,7 +144,7 @@ json MapExtractor::extractFromMap(BaseCube &cube_ref, string map_name, int index
   case BPF_MAP_TYPE_STACK:{
     // Case to handle ARRAY (get/set) and QUEUE/STACK maps (no get/set operation, but push/pop)
 
-    auto entries = getMapEntries(table, desc.key_size, desc.leaf_size, desc.type != BPF_MAP_TYPE_ARRAY);
+    auto entries = getMapEntries(table, desc);
 
     for(auto &entry: entries) {
       int offset = 0;
@@ -162,12 +162,42 @@ json MapExtractor::extractFromMap(BaseCube &cube_ref, string map_name, int index
 }
 
 std::vector<std::shared_ptr<MapEntry>> MapExtractor::getMapEntries(
-    RawTable table, size_t key_size, size_t value_size, bool isQueueStack) {
+    RawTable table, const TableDesc &desc) {
   std::vector<std::shared_ptr<MapEntry>> vec;
 
-  if(isQueueStack) {
+  void *last_key = nullptr;
+
+  // Looping until the RawTable has a "next" entry
+  while (true) {
+    // Creating a MapEntry object which internally allocates the memory to
+    // contain the map entry's key and value
+    MapEntry entry(desc.key_size, desc.leaf_size);
+    int fd = table.next(last_key, entry.getKey());
+    last_key = entry.getKey();
+    if (fd > -1) {
+      table.get(entry.getKey(), entry.getValue());
+      vec.push_back(std::make_shared<MapEntry>(entry));
+    } else
+      break;
+  }
+
+  if(table.is_batch_supported()) {
+    if(desc.type == BPF_MAP_TYPE_QUEUE || desc.type == BPF_MAP_TYPE_STACK) {
+      MapEntry entry(desc.key_size * desc.max_entries, desc.leaf_size * desc.max_entries);
+      auto tmp = table.get_and_delete_batch(entry.getKey(), entry.getValue(), desc.max_entries);
+
+      auto err = errno;
+      int i = 2;
+    }else {
+      MapEntry entry(desc.key_size * desc.max_entries, desc.leaf_size * desc.max_entries);
+      auto tmp = table.get_batch(entry.getKey(), entry.getValue(), desc.max_entries);
+
+      auto err = errno;
+      int i = 2;
+    }
+  } else if(desc.type == BPF_MAP_TYPE_QUEUE || desc.type == BPF_MAP_TYPE_STACK) {
     while(true) {
-      MapEntry entry(0, value_size);
+      MapEntry entry(0, desc.leaf_size);
       if (table.pop(entry.getValue()) != 0) {
         break;
       }
@@ -180,7 +210,7 @@ std::vector<std::shared_ptr<MapEntry>> MapExtractor::getMapEntries(
     while (true) {
       // Creating a MapEntry object which internally allocates the memory to
       // contain the map entry's key and value
-      MapEntry entry(key_size, value_size);
+      MapEntry entry(desc.key_size, desc.leaf_size);
       int fd = table.next(last_key, entry.getKey());
       last_key = entry.getKey();
       if (fd > -1) {

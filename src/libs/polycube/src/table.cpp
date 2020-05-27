@@ -40,6 +40,11 @@ class RawTable::impl {
   int pop(void *value);
   int push(const void *value);
 
+  int get_batch(void *keys, void *values, unsigned count);
+  int get_and_delete_batch(void *keys, void *values, unsigned count);
+
+  bool is_batch_supported();
+
  private:
   bool is_queue_stack_enabled;
   bool is_batch_enabled;
@@ -101,6 +106,24 @@ int RawTable::impl::push(const void *value) {
   return bpf_map_update_elem(fd_, nullptr, value, 0);
 }
 
+int RawTable::impl::get_batch(void *keys, void *values, unsigned count) {
+  if (!is_batch_enabled)
+    throw std::runtime_error("BATCH operations are not supported."
+                             "Update your kernel to version 5.6.0");
+  return bpf_map_lookup_batch(fd_, nullptr, &keys, keys, values, &count, nullptr);
+}
+
+int RawTable::impl::get_and_delete_batch(void *keys, void *values, unsigned count) {
+  if(!is_batch_enabled)
+    throw std::runtime_error("BATCH operations are not supported."
+                             "Update your kernel to version 5.6.0");
+  return bpf_map_lookup_and_delete_batch(fd_, nullptr, &keys, keys, values, &count, nullptr);
+}
+
+bool RawTable::impl::is_batch_supported() {
+  return is_batch_enabled;
+}
+
 // PIMPL
 RawTable::~RawTable() {}
 
@@ -132,6 +155,18 @@ int RawTable::pop(void *value) {
 
 int RawTable::push(const void *value) {
   return pimpl_->push(value);
+}
+
+int RawTable::get_batch(void *keys, void *values, unsigned count) {
+  return pimpl_->get_batch(keys, values, count);
+}
+
+int RawTable::get_and_delete_batch(void *keys, void *values, unsigned count) {
+  return pimpl_->get_and_delete_batch(keys, values, count);
+}
+
+bool RawTable::is_batch_supported() {
+  return pimpl_->is_batch_supported();
 }
 
 }  // namespace service
