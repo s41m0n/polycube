@@ -51,16 +51,17 @@ void Dynmon::setEgressPathConfig(const PathConfigJsonObject &config) {
     std::string swapped_code = original_code;
     for(auto &mc : config.getMetricConfigs()) {
       if(mc.getExtractionOptions().getSwapOnRead()) {
-        formatCodeToSwap(original_code, swapped_code, mc.getMapName());
+        swapped_code = std::regex_replace(original_code, std::regex("(" + mc.getName() + ")"), mc.getName() + SWAP_MAP_NAME_FORMAT);
         egressSwapState.enableSwap();
       }
     }
     if(egressSwapState.isSwapEnabled()) {
       logger()->debug("[Dynmon] Swap enabled for EGRESS program");
-      egressSwapState.setSwapCode(swapped_code);
-      egressSwapState.setOrigCode(original_code);
-      //Load the original tuned code
-      reload(original_code, 0, ProgramType::EGRESS);
+      auto master_code = std::regex_replace(dynmon_swap_master, std::regex(SWAP_MASTER_TEMPLATE),
+                                            "egress");
+      reload(dynmon_swap_master, 0, ProgramType::EGRESS);
+      add_program(original_code, 1, ProgramType::EGRESS);
+      add_program(swapped_code, 2, ProgramType::EGRESS);
     } else {
       //Load the real config code since no swap
       reload(config.getCode(), 0, ProgramType::EGRESS);
@@ -84,16 +85,19 @@ void Dynmon::setIngressPathConfig(const PathConfigJsonObject &config) {
     for(auto &mc : config.getMetricConfigs()) {
       //Check if the map needs to be swapped
       if(mc.getExtractionOptions().getSwapOnRead()) {
-        formatCodeToSwap(original_code, swapped_code, mc.getMapName());
+        swapped_code = std::regex_replace(original_code, std::regex("(" + mc.getName() + ")"), mc.getName() + SWAP_MAP_NAME_FORMAT);
         ingressSwapState.enableSwap();
       }
     }
     if(ingressSwapState.isSwapEnabled()) {
       logger()->debug("[Dynmon] Swap enabled for INGRESS program");
-      ingressSwapState.setSwapCode(swapped_code);
-      ingressSwapState.setOrigCode(original_code);
-      //Load the original tuned code
-      reload(original_code, 0, ProgramType::INGRESS);
+      auto master_code = std::regex_replace(dynmon_swap_master, std::regex(SWAP_MASTER_TEMPLATE),
+                                            "ingress");
+      reload(master_code, 0, ProgramType::INGRESS);
+      add_program(original_code, 1, ProgramType::INGRESS);
+      add_program(swapped_code, 2, ProgramType::INGRESS);
+      auto table = get_array_table<int>(SWAP_MASTER_INDEX_MAP);
+      table.set(0, 1);
     } else {
       //Load the real config code since no swap
       reload(config.getCode(), 0, ProgramType::INGRESS);
@@ -162,8 +166,8 @@ std::shared_ptr<Metric> Dynmon::getEgressMetric(const std::string &name) {
     // Extracting the metric value from the corresponding eBPF map
     std::string mapName = metricConfig->getMapName();
     auto extractionOptions = metricConfig->getExtractionOptions();
-    if(extractionOptions->getSwapOnRead() && !egressSwapState.hasSwapped()) {
-      SwapStateConfig::formatMapName(mapName);
+    if(extractionOptions->getSwapOnRead()) {
+      //SwapStateConfig::formatMapName(mapName);
       logger()->debug("[Dynmon] EGRESS - Reading from Map: {} since code has swapped back", mapName);
     }
     auto value = MapExtractor::extractFromMap(*this, mapName,0, ProgramType::EGRESS, extractionOptions);
@@ -191,8 +195,8 @@ std::vector<std::shared_ptr<Metric>> Dynmon::getEgressMetrics() {
       // Extracting the metric value from the corresponding eBPF map
       std::string mapName = it->getMapName();
       auto extractionOptions = it->getExtractionOptions();
-      if(extractionOptions->getSwapOnRead() && !egressSwapState.hasSwapped()) {
-        SwapStateConfig::formatMapName(mapName);
+      if(extractionOptions->getSwapOnRead()) {
+        //SwapStateConfig::formatMapName(mapName);
         logger()->debug("[Dynmon] EGRESS - Reading from Map: {} since code has swapped back", mapName);
       }
       auto value = MapExtractor::extractFromMap(*this, mapName, 0,
@@ -218,8 +222,8 @@ std::shared_ptr<Metric> Dynmon::getIngressMetric(const std::string &name) {
     // Extracting the metric value from the corresponding eBPF map
     std::string mapName = metricConfig->getMapName();
     auto extractionOptions = metricConfig->getExtractionOptions();
-    if(extractionOptions->getSwapOnRead() && !ingressSwapState.hasSwapped()) {
-      SwapStateConfig::formatMapName(mapName);
+    if(extractionOptions->getSwapOnRead()) {
+      //SwapStateConfig::formatMapName(mapName);
       logger()->debug("[Dynmon] INGRESS - Reading from Map: {} since code has swapped back", mapName);
     }
     auto value = MapExtractor::extractFromMap(*this, mapName,
@@ -249,8 +253,8 @@ std::vector<std::shared_ptr<Metric>> Dynmon::getIngressMetrics() {
       // Extracting the metric value from the corresponding eBPF map
       std::string mapName = it->getMapName();
       auto extractionOptions = it->getExtractionOptions();
-      if(extractionOptions->getSwapOnRead() && !ingressSwapState.hasSwapped()) {
-        SwapStateConfig::formatMapName(mapName);
+      if(extractionOptions->getSwapOnRead()) {
+        ingressSwapState.formatMapName(mapName);
         logger()->debug("[Dynmon] INGRESS - Reading from Map: {} since code has swapped back", mapName);
       }
       auto value = MapExtractor::extractFromMap(*this, mapName, 0,
@@ -294,8 +298,8 @@ std::string Dynmon::getEgressOpenMetrics() {
 
       std::string mapName = it->getMapName();
       auto extractionOptions = it->getExtractionOptions();
-      if(extractionOptions->getSwapOnRead() && !egressSwapState.hasSwapped()) {
-        SwapStateConfig::formatMapName(mapName);
+      if(extractionOptions->getSwapOnRead()) {
+        //SwapStateConfig::formatMapName(mapName);
         logger()->debug("[Dynmon] EGRESS - Reading from Map: {} since code has swapped back", mapName);
       }
       // Extracting the metric value from the corresponding eBPF map
@@ -329,8 +333,8 @@ std::string Dynmon::getIngressOpenMetrics() {
 
       std::string mapName = it->getMapName();
       auto extractionOptions = it->getExtractionOptions();
-      if(extractionOptions->getSwapOnRead() && !egressSwapState.hasSwapped()) {
-        SwapStateConfig::formatMapName(mapName);
+      if(extractionOptions->getSwapOnRead()) {
+        //SwapStateConfig::formatMapName(mapName);
         logger()->debug(
             "[Dynmon] EGRESS - Reading from Map: {} since code has swapped back",
             mapName);
@@ -403,43 +407,12 @@ std::string Dynmon::toOpenMetrics(std::shared_ptr<MetricConfig> conf,
 
 void Dynmon::triggerReadEgress() {
   if(egressSwapState.isSwapEnabled()) {
-    egressSwapState.triggerHasSwapped();
-    if(egressSwapState.hasSwapped()) {
-      logger()->debug("[Dynmon] Triggered read EGRESS! Loading Swap code and read from original");
-      reload(egressSwapState.getSwapCode(), 0, ProgramType::EGRESS);
-    } else {
-      logger()->debug("[Dynmon] Triggered read EGRESS! Loading original code and read from Swap");
-      reload(egressSwapState.getOrigCode(), 0, ProgramType::EGRESS);
-    }
+    egressSwapState.triggerRead();
   }
 }
 
 void Dynmon::triggerReadIngress() {
   if(ingressSwapState.isSwapEnabled()) {
-    ingressSwapState.triggerHasSwapped();
-    if(ingressSwapState.hasSwapped()) {
-      logger()->debug("[Dynmon] Triggered read INGRESS! Loading Swap code and read from original");
-      reload(ingressSwapState.getSwapCode(), 0, ProgramType::INGRESS);
-    } else {
-      logger()->debug("[Dynmon] Triggered read INGRESS! Loading original code and read from Swap");
-      reload(ingressSwapState.getOrigCode(), 0, ProgramType::INGRESS);
-    }
+    get_array_table<int>(SWAP_MASTER_INDEX_MAP).set(0, ingressSwapState.triggerRead());
   }
-}
-
-void Dynmon::formatCodeToSwap(std::string &original_code, std::string &swapped_code,
-                              std::string mapName) {
-  std::regex name_sub ("(" + mapName + ")");   // to change from name to name_1
-  std::regex map_decl ("(BPF_.+" + mapName +".+)"); // to declare the map the same, otherwise not accessible
-  std::smatch match1, match2;
-  swapped_code = std::regex_replace(original_code, name_sub, mapName + SWAP_MAP_NAME_FORMAT);
-  if(std::regex_search(swapped_code, match1, map_decl) && std::regex_search(original_code, match2, map_decl)) {
-    std::string orig_decl = match2[0].str();
-    std::string swap_decl = match1[0].str();
-    std::size_t orig_index = original_code.find(orig_decl);   //index must exists since regex has matched
-    std::size_t swap_index = swapped_code.find(swap_decl);    //index must exists since regex has matched
-    original_code.insert(orig_index, swap_decl + "\n");
-    swapped_code.insert(swap_index, orig_decl + "\n");
-  } else
-    throw std::runtime_error("Fix regex search method - formatCodeToSwap()");
 }
